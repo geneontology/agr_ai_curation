@@ -38,7 +38,7 @@ class GitHubAuthProvider(AuthProvider):
             "redirect_uri", "http://localhost:3002/auth/callback"
         )
         self.jwt_secret: str = config["jwt_secret"]
-        self.users_yaml_url: str = config.get("users_yaml_url", DEFAULT_USERS_YAML_URL)
+        self.users_yaml_url: str = config.get("users_yaml_url") or DEFAULT_USERS_YAML_URL
         self.cache_ttl: int = int(config.get("cache_ttl_seconds", DEFAULT_CACHE_TTL_SECONDS))
         self.timeout_seconds: int = int(config.get("timeout_seconds", 10))
 
