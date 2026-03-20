@@ -50,6 +50,32 @@ def create_auth_provider() -> AuthProvider:
             }
         )
 
+    if provider_type == "github":
+        client_id = os.getenv("GITHUB_CLIENT_ID")
+        client_secret = os.getenv("GITHUB_CLIENT_SECRET")
+        jwt_secret = os.getenv("GITHUB_JWT_SECRET")
+        if not client_id or not client_secret or not jwt_secret:
+            raise ValueError(
+                "AUTH_PROVIDER=github requires GITHUB_CLIENT_ID, "
+                "GITHUB_CLIENT_SECRET, and GITHUB_JWT_SECRET"
+            )
+        from src.auth.providers.github import GitHubAuthProvider
+
+        return GitHubAuthProvider(
+            {
+                "client_id": client_id,
+                "client_secret": client_secret,
+                "redirect_uri": os.getenv(
+                    "GITHUB_REDIRECT_URI", "http://localhost:3002/auth/callback"
+                ),
+                "jwt_secret": jwt_secret,
+                "users_yaml_url": os.getenv(
+                    "GITHUB_USERS_YAML_URL",
+                    "https://raw.githubusercontent.com/geneontology/go-site/master/metadata/users.yaml",
+                ),
+            }
+        )
+
     if provider_type == "dev":
         raise ValueError("AUTH_PROVIDER=dev requires DEV_MODE=true")
 

@@ -338,11 +338,11 @@ def get_auth_provider() -> str:
     provider = os.getenv("AUTH_PROVIDER", "").strip().lower()
     if not provider:
         raise ValueError(
-            "AUTH_PROVIDER must be set explicitly (one of: cognito, oidc, dev)"
+            "AUTH_PROVIDER must be set explicitly (one of: cognito, oidc, github, dev)"
         )
-    if provider not in {"cognito", "oidc", "dev"}:
+    if provider not in {"cognito", "oidc", "github", "dev"}:
         raise ValueError(
-            f"Invalid AUTH_PROVIDER '{provider}'. Expected one of: cognito, oidc, dev"
+            f"Invalid AUTH_PROVIDER '{provider}'. Expected one of: cognito, oidc, github, dev"
         )
     return provider
 
@@ -368,6 +368,12 @@ def is_auth_configured() -> bool:
             bool(os.getenv("OIDC_ISSUER_URL"))
             and bool(os.getenv("OIDC_CLIENT_ID"))
             and bool(os.getenv("OIDC_REDIRECT_URI"))
+        )
+    if provider == "github":
+        return (
+            bool(os.getenv("GITHUB_CLIENT_ID"))
+            and bool(os.getenv("GITHUB_CLIENT_SECRET"))
+            and bool(os.getenv("GITHUB_JWT_SECRET"))
         )
     return False
 

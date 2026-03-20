@@ -138,6 +138,9 @@ async def callback(
         tokens = await provider.handle_callback(code, code_verifier)
         claims = await provider.validate_token(tokens.id_token)
         principal = provider.extract_principal(claims)
+    except PermissionError as exc:
+        logger.warning("Authorization denied during callback: %s", exc)
+        raise HTTPException(status_code=403, detail=str(exc))
     except Exception as exc:
         logger.error("Authentication callback failed: %s", exc)
         raise HTTPException(status_code=400, detail=f"Authentication callback failed: {exc}")
