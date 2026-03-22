@@ -309,6 +309,20 @@ async def logout(
     return json_response
 
 
+@router.get("/logout/redirect")
+async def logout_redirect(request: Request):
+    """Logout via browser redirect — clears cookie and sends user to /."""
+    secure_cookies = get_secure_cookies()
+    redirect = RedirectResponse(url="/", status_code=302)
+    redirect.delete_cookie(
+        key="auth_token", httponly=True, secure=secure_cookies, samesite="lax",
+    )
+    redirect.delete_cookie(
+        key="cognito_token", httponly=True, secure=secure_cookies, samesite="lax",
+    )
+    return redirect
+
+
 class _AuthCompat:
     """Compatibility wrapper for test dependency overrides."""
 

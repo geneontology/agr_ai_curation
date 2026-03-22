@@ -267,8 +267,8 @@ class GitHubAuthProvider(AuthProvider):
         )
 
     def get_logout_url(self, redirect_uri: Optional[str] = None) -> Optional[str]:
-        """GitHub has no logout redirect — return app root."""
-        return "/"
+        """Return redirect-based logout endpoint that clears cookies server-side."""
+        return "/api/auth/logout/redirect"
 
     @property
     def provider_name(self) -> str:
