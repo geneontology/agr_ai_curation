@@ -50,7 +50,7 @@ redis>=5.0
 click
 
 # Noctua GO-CAM integration
-noctua-py @ git+https://github.com/geneontology/noctua-py.git
+git+https://github.com/geneontology/noctua-py.git
 
 # Testing
 pytest
