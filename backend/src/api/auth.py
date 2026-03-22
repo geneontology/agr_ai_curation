@@ -252,6 +252,7 @@ async def _get_user_from_cookie_impl(
             "email": principal.email,
             "name": principal.display_name or principal.email,
             "provider": principal.provider,
+            "barista_token": claims.get("barista_token"),
         }
         payload = _with_group_claim_aliases(payload, principal.groups)
         return _build_mock_user(payload)
