@@ -936,6 +936,7 @@ async def run_agent_streamed(
     active_groups: Optional[List[str]] = None,
     agent: Optional[Agent] = None,
     doc_context: Optional["DocumentContext"] = None,
+    barista_token: Optional[str] = None,
 ) -> AsyncGenerator[Dict[str, Any], None]:
     """
     Run an agent with streaming output.
@@ -1021,6 +1022,7 @@ async def run_agent_streamed(
             hierarchy=hierarchy,
             abstract=abstract,
             active_groups=active_groups,
+            barista_token=barista_token,
         )
         agent_name = agent.name
     else:

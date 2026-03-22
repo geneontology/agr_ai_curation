@@ -547,6 +547,7 @@ async def chat_stream_endpoint(chat_message: ChatMessage, user: Dict[str, Any] =
     """Stream a chat response using Server-Sent Events."""
     session_id = chat_message.session_id or str(uuid.uuid4())
     user_id = user.get("sub")
+    barista_token = user.get("barista_token")
 
     if not user_id:
         raise HTTPException(status_code=401, detail="User identifier not found in token")
@@ -634,6 +635,7 @@ async def chat_stream_endpoint(chat_message: ChatMessage, user: Dict[str, Any] =
                 document_name=document_name,
                 conversation_history=conversation_history,
                 active_groups=active_groups,
+                barista_token=barista_token,
             ):
                 # Check for cancellation (local event OR Redis signal)
                 if cancel_event.is_set() or await check_cancel_signal(current_session_id):

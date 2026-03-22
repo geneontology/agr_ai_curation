@@ -49,6 +49,9 @@ redis>=5.0
 # CLI support
 click
 
+# Noctua GO-CAM integration
+noctua-py
+
 # Testing
 pytest
 pytest-asyncio
