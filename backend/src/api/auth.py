@@ -300,8 +300,12 @@ async def logout(
         "message": "User session terminated successfully",
         "logout_url": logout_url,
     })
-    json_response.delete_cookie(key="auth_token", secure=secure_cookies, samesite="lax")
-    json_response.delete_cookie(key="cognito_token", secure=secure_cookies, samesite="lax")
+    json_response.delete_cookie(
+        key="auth_token", httponly=True, secure=secure_cookies, samesite="lax",
+    )
+    json_response.delete_cookie(
+        key="cognito_token", httponly=True, secure=secure_cookies, samesite="lax",
+    )
     return json_response
 
 
