@@ -39,6 +39,7 @@ class GitHubAuthProvider(AuthProvider):
         )
         self.jwt_secret: str = config["jwt_secret"]
         self.users_yaml_url: str = config.get("users_yaml_url") or DEFAULT_USERS_YAML_URL
+        self.barista_exchange_url: Optional[str] = config.get("barista_exchange_url")
         self.cache_ttl: int = int(config.get("cache_ttl_seconds", DEFAULT_CACHE_TTL_SECONDS))
         self.timeout_seconds: int = int(config.get("timeout_seconds", 10))
 
@@ -114,6 +115,42 @@ class GitHubAuthProvider(AuthProvider):
         return github_username.lower() in allowed
 
     # ------------------------------------------------------------------
+    # Barista token exchange
+    # ------------------------------------------------------------------
+
+    async def _exchange_barista_token(self, github_access_token: str) -> Optional[str]:
+        """Exchange a GitHub access token for a Barista session token.
+
+        Calls the Barista /auth/token/exchange endpoint. Returns the
+        Barista token on success, or None if Barista is unavailable or
+        the user is not authorized there. Failures are non-fatal — the
+        user can still use the platform without Noctua integration.
+        """
+        if not self.barista_exchange_url:
+            return None
+
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
+                resp = await client.post(
+                    self.barista_exchange_url,
+                    json={"github_access_token": github_access_token},
+                )
+            if resp.status_code == 200:
+                data = resp.json()
+                barista_token = data.get("token")
+                if barista_token:
+                    logger.info("Barista token obtained for user")
+                    return barista_token
+                logger.warning("Barista exchange returned 200 but no token")
+            else:
+                logger.warning(
+                    "Barista token exchange returned %d", resp.status_code
+                )
+        except Exception:
+            logger.exception("Barista token exchange failed (non-fatal)")
+        return None
+
+    # ------------------------------------------------------------------
     # AuthProvider interface
     # ------------------------------------------------------------------
 
@@ -181,6 +218,11 @@ class GitHubAuthProvider(AuthProvider):
                 "with noctua.go.allow-edit permission."
             )
 
+        # Exchange GitHub access token for a Barista session token.
+        # Non-fatal: if Barista is down the user can still use the
+        # platform, just without Noctua integration.
+        barista_token = await self._exchange_barista_token(access_token)
+
         # Self-sign a JWT as the id_token
         now = int(time.time())
         claims = {
@@ -191,6 +233,8 @@ class GitHubAuthProvider(AuthProvider):
             "iat": now,
             "exp": now + 86400,  # 24 hours
         }
+        if barista_token:
+            claims["barista_token"] = barista_token
         id_token = jwt.encode(claims, self.jwt_secret, algorithm="HS256")
 
         return TokenSet(
