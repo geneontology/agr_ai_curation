@@ -282,18 +282,19 @@ def _build_logout_redirect_uri(request: Request, provider: AuthProvider) -> str:
 @router.post("/logout")
 async def logout(
     request: Request,
-    response: Response,
-    user: dict = get_auth_dependency(),
 ):
     """Logout endpoint - clears auth cookie and returns provider logout URL."""
-    if not user:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-
     secure_cookies = get_secure_cookies()
-    provider = _get_provider_or_503()
-    redirect_uri = _build_logout_redirect_uri(request, provider)
 
-    logout_url = await run_in_threadpool(provider.get_logout_url, redirect_uri)
+    # Build logout URL from provider if available; fall back to "/"
+    logout_url = "/"
+    try:
+        provider = _get_provider_or_503()
+        redirect_uri = _build_logout_redirect_uri(request, provider)
+        logout_url = await run_in_threadpool(provider.get_logout_url, redirect_uri) or "/"
+    except Exception:
+        pass
+
     json_response = JSONResponse(content={
         "status": "logged_out",
         "message": "User session terminated successfully",
