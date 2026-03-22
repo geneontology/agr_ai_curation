@@ -43,6 +43,7 @@ agent_bundles:
   - name: go_annotations
     has_schema: true
   - name: json_formatter
+  - name: noctua
   - name: ontology_mapping
     has_schema: true
   - name: orthologs
