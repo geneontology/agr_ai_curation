@@ -62,6 +62,13 @@ tools:
     required_context: []
     description: Query the Alliance API on alliancegenome.org
     source_file: python/src/agr_ai_curation_alliance/tools/rest.py
+  - tool_id: noctua_gocam
+    binding_kind: context_factory
+    callable_factory: agr_ai_curation_alliance.tools.noctua:create_noctua_tool
+    required_context:
+      - barista_token
+    description: Query and edit GO-CAM models via Noctua/Barista
+    source_file: python/src/agr_ai_curation_alliance/tools/noctua.py
   - tool_id: save_csv_file
     binding_kind: static
     callable: agr_ai_curation_alliance.tools.file_output:save_csv_file

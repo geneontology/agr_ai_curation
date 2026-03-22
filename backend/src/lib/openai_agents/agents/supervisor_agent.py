@@ -332,6 +332,7 @@ def _create_dynamic_specialist_tools(
     abstract: Optional[str] = None,
     active_groups: Optional[List[str]] = None,
     tool_specs: Optional[List[Dict[str, Any]]] = None,
+    barista_token: Optional[str] = None,
 ) -> List[Callable]:
     """
     Dynamically create specialist tools based on unified agent records.
@@ -381,6 +382,10 @@ def _create_dynamic_specialist_tools(
         if group_rules_enabled and active_groups:
             agent_kwargs["active_groups"] = active_groups
 
+        # Pass Barista token for Noctua-integrated tools
+        if barista_token:
+            agent_kwargs["barista_token"] = barista_token
+
         try:
             # Create the agent instance from unified spec.
             agent = get_agent_by_id(agent_key, **agent_kwargs)
@@ -420,6 +425,7 @@ def create_supervisor_agent(
     abstract: Optional[str] = None,
     enable_guardrails: bool = False,  # Enable input guardrails (PII detection, topic check)
     active_groups: Optional[List[str]] = None,  # Group-specific rules to inject (e.g., ["MGI", "FB"])
+    barista_token: Optional[str] = None,  # Barista session token for Noctua integration
 ) -> Agent:
     """
     Create a Supervisor agent with dynamically discovered specialist tools.
@@ -518,6 +524,7 @@ def create_supervisor_agent(
         abstract=abstract,
         active_groups=active_groups,
         tool_specs=tool_specs,
+        barista_token=barista_token,
     )
 
     routing_duration_ms = (time.monotonic() - route_start) * 1000

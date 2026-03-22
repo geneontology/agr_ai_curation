@@ -1,0 +1,66 @@
+# =============================================================================
+# AGENT DEFINITION: noctua
+# =============================================================================
+# Creates and edits GO-CAM (Gene Ontology Causal Activity Models) via Noctua.
+# Tool name generated at runtime: ask_noctua_specialist
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# BASIC INFORMATION
+# -----------------------------------------------------------------------------
+agent_id: noctua
+
+name: "Noctua GO-CAM Agent"
+
+description: >
+  Creates, queries, and edits Gene Ontology Causal Activity Models (GO-CAMs)
+  via the Noctua/Barista API. Supports listing models, adding molecular
+  activities, creating causal relationships with evidence, and exporting models.
+
+category: "Curation"
+subcategory: "GO-CAM Modeling"
+
+# -----------------------------------------------------------------------------
+# SUPERVISOR ROUTING
+# -----------------------------------------------------------------------------
+supervisor_routing:
+  enabled: true
+  description: >
+    Use for creating or editing GO-CAM models, adding molecular activities
+    or causal relationships to models, querying existing GO-CAM models,
+    or any task involving Noctua or causal activity modeling.
+  batchable: false
+
+# -----------------------------------------------------------------------------
+# TOOLS
+# -----------------------------------------------------------------------------
+tools:
+  - noctua_gocam
+
+# -----------------------------------------------------------------------------
+# MODEL CONFIGURATION
+# -----------------------------------------------------------------------------
+model_config:
+  model: "${AGENT_NOCTUA_MODEL:-gpt-4o}"
+  temperature: 0.1
+  reasoning: "low"
+
+# -----------------------------------------------------------------------------
+# EXECUTION REQUIREMENTS
+# -----------------------------------------------------------------------------
+requires_document: false
+required_params: []
+
+batch_capabilities: []
+
+# -----------------------------------------------------------------------------
+# FRONTEND DISPLAY
+# -----------------------------------------------------------------------------
+frontend:
+  icon: "🦉"
+  show_in_palette: true
+
+# -----------------------------------------------------------------------------
+# GROUP RULES
+# -----------------------------------------------------------------------------
+group_rules_enabled: false

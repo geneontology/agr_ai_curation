@@ -962,6 +962,7 @@ def _binding_context_payload(
             "document_id": execution_context.document_id,
             "user_id": execution_context.user_id,
             "database_url": execution_context.database_url,
+            "barista_token": execution_context.barista_token,
         }
 
     required_context = set(binding.required_context)
@@ -1276,6 +1277,7 @@ class ToolExecutionContext:
     document_id: Optional[str] = None
     user_id: Optional[str] = None
     database_url: Optional[str] = None
+    barista_token: Optional[str] = None
     tool_tracker: Optional[Any] = None
 
 def _canonicalize_tool_id(tool_id: str) -> str:
@@ -1756,10 +1758,14 @@ def _build_tool_execution_context(
         env_database_url = os.getenv("CURATION_DB_URL", "").strip()
         database_url = env_database_url or None
 
+    raw_barista_token = kwargs.get("barista_token")
+    barista_token = str(raw_barista_token) if raw_barista_token not in (None, "") else None
+
     return ToolExecutionContext(
         document_id=document_id,
         user_id=user_id,
         database_url=database_url,
+        barista_token=barista_token,
         tool_tracker=tool_tracker,
     )
 
