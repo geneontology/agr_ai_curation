@@ -73,6 +73,7 @@ def create_auth_provider() -> AuthProvider:
                     "GITHUB_USERS_YAML_URL",
                     "https://raw.githubusercontent.com/geneontology/go-site/master/metadata/users.yaml",
                 ),
+                "barista_exchange_url": os.getenv("BARISTA_TOKEN_EXCHANGE_URL"),
             }
         )
 
