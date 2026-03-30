@@ -83,20 +83,21 @@ aws ec2 terminate-instances --instance-ids i-0ea2dc21ef8da2fa4 --region us-east-
 
 ### 4. EC2 Instance: `agr-ai-curation-pdfx` (CPU, PDF extraction)
 
-- **InstanceId**: `i-0e82df32732b76879`
-- **Type**: t3.2xlarge (8 vCPU, 32 GB RAM) — CPU-only, marker runs on CPU
-- **AMI**: ami-0462ececcfe0a450f (Ubuntu 24.04 LTS)
-- **Storage**: 50 GB gp3
+- **InstanceId**: `i-07302114d32e4dec9`
+- **Type**: g5.2xlarge (8 vCPU, 32 GB RAM, 1x NVIDIA A10G 24GB VRAM)
+- **AMI**: ami-052266c3e21dff7db (Deep Learning Base OSS Nvidia Driver GPU AMI, Ubuntu 24.04)
+- **Storage**: 100 GB gp3
 - **Subnet**: subnet-0a09e8ea837f8606b (go-production, us-east-1a)
-- **Private IP**: 10.0.1.11
-- **Public IP**: 3.82.1.92 (auto-assigned, SSH only)
+- **Private IP**: 10.0.1.142
+- **Public IP**: 3.85.89.94 (auto-assigned, SSH only)
 - **Key pair**: go-ssh
-- **Created**: 2026-03-29 (replaces i-0f3ff8b455f6c7876, OOM on t3.xlarge)
+- **Created**: 2026-03-29 (GPU upgrade from t3.2xlarge, on-demand start/stop)
 - **SG rule**: sgr-0b807fce856e17523 (port 5000, self-referencing SG for internal access)
+- **On-demand**: Managed by backend EC2 manager, auto-stops after 15 min idle
 
 **Undo**:
 ```bash
-aws ec2 terminate-instances --instance-ids i-0e82df32732b76879 --region us-east-1
+aws ec2 terminate-instances --instance-ids i-07302114d32e4dec9 --region us-east-1
 ```
 
 ---
@@ -123,6 +124,7 @@ aws ec2 release-address --allocation-id eipalloc-0463d1408c59aadbd --region us-e
 | EC2 Instance | i-07d4432be2e8afea8 | 2026-03-27 |
 | EC2 Instance (PDFX t3.large) | i-02e073013836337d2 | 2026-03-29 (OOM, upgraded to t3.xlarge) |
 | EC2 Instance (PDFX t3.xlarge) | i-0f3ff8b455f6c7876 | 2026-03-29 (OOM, upgraded to t3.2xlarge) |
+| EC2 Instance (PDFX t3.2xlarge) | i-0e82df32732b76879 | 2026-03-29 (replaced with g5.2xlarge GPU) |
 
 ---
 
@@ -136,8 +138,8 @@ aws ec2 disassociate-address --association-id eipassoc-05d74fc2a7e08fe7b --regio
 aws ec2 release-address --allocation-id eipalloc-0463d1408c59aadbd --region us-east-1
 
 # 4. Terminate PDFX instance
-aws ec2 terminate-instances --instance-ids i-0e82df32732b76879 --region us-east-1
-aws ec2 wait instance-terminated --instance-ids i-0e82df32732b76879 --region us-east-1
+aws ec2 terminate-instances --instance-ids i-07302114d32e4dec9 --region us-east-1
+aws ec2 wait instance-terminated --instance-ids i-07302114d32e4dec9 --region us-east-1
 
 # 3. Terminate main app instance
 aws ec2 terminate-instances --instance-ids i-0ea2dc21ef8da2fa4 --region us-east-1
