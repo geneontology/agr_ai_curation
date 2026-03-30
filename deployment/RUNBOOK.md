@@ -171,18 +171,49 @@ The compose file does not pass GitHub auth env vars by default. Add them to the 
 
 ### 2.10 Build backend and frontend from source
 
-The published frontend image on ECR is broken (empty Alpine scratch image). The backend needs the GitHub auth code that may not be in the published image. Build both locally:
+We run from our fork, not from the published upstream ECR images. The upstream images don't have our GitHub auth provider, logout fixes, or frontend connection-status fixes. **You must build locally and you must get the image tags right**, or Docker Compose will silently pull the upstream images and things will break in confusing ways (wrong auth provider, false connection warnings, etc.).
+
+**Step 1: Read the tags that Compose expects.**
+
+```bash
+grep '_IMAGE_TAG=' ~/.agr_ai_curation/.env
+```
+
+The installer typically sets these to `latest`. Whatever they say, your `docker build -t` must use the same tag.
+
+**Step 2: Build both images with matching tags.**
 
 ```bash
 cd ~/agr_ai_curation
 
-docker build -t public.ecr.aws/v4p5b7m9/agr-ai-curation-backend:smoke-20260310-final ./backend
+# Read the expected tags
+BACKEND_TAG=$(grep 'BACKEND_IMAGE_TAG=' ~/.agr_ai_curation/.env | cut -d= -f2)
+FRONTEND_TAG=$(grep 'FRONTEND_IMAGE_TAG=' ~/.agr_ai_curation/.env | cut -d= -f2)
+BACKEND_IMAGE=$(grep 'BACKEND_IMAGE=' ~/.agr_ai_curation/.env | grep -v TAG | cut -d= -f2)
+FRONTEND_IMAGE=$(grep 'FRONTEND_IMAGE=' ~/.agr_ai_curation/.env | grep -v TAG | cut -d= -f2)
 
-docker build --build-arg VITE_DEV_MODE=false \
-  -t public.ecr.aws/v4p5b7m9/agr-ai-curation-frontend:smoke-20260310-final ./frontend
+echo "Building backend as ${BACKEND_IMAGE}:${BACKEND_TAG}"
+echo "Building frontend as ${FRONTEND_IMAGE}:${FRONTEND_TAG}"
+
+docker build -t "${BACKEND_IMAGE}:${BACKEND_TAG}" ./backend
+docker build --build-arg VITE_DEV_MODE=false -t "${FRONTEND_IMAGE}:${FRONTEND_TAG}" ./frontend
 ```
 
-The tags must match what `docker-compose.production.yml` expects (check `FRONTEND_IMAGE_TAG` and `BACKEND_IMAGE_TAG` defaults or set them in `.env`).
+**Step 3: Verify the local images exist and Compose won't pull from ECR.**
+
+```bash
+docker images | grep -E 'backend|frontend' | grep -v TAG
+```
+
+You should see your locally built images with timestamps from just now.
+
+> **Why this matters:** Docker Compose resolves images by `name:tag`. If no local image matches, it pulls from the registry. The upstream ECR images lack our fork's changes. The failure mode is silent — containers start fine but run the wrong code. We've been burned by this on both backend (auth provider rejected `github`) and frontend (false Weaviate/curation DB warnings).
+>
+> **Clean rebuilds:** If source changes aren't being picked up even with the right tag, prune the buildx cache first:
+>
+> ```bash
+> docker builder prune -af
+> ```
 
 > **Note:** The alliance package has its own virtualenv with its own dependencies, defined in `packages/alliance/requirements/runtime.txt` (not `backend/requirements.txt`). This includes `noctua-py` and other tool-specific libraries. These are installed automatically by the package runner when the backend starts, but see the venv cache note below.
 
@@ -287,7 +318,164 @@ Key points about this nginx config:
 - **proxy_read_timeout 600s** because LLM agent calls can take several minutes.
 - **proxy_buffering off** so streaming responses are not buffered.
 
-### 2.14 Verify
+### 2.14 Deploy PDFX on a separate instance
+
+The PDF extraction service runs on its own EC2 instance (t3.xlarge minimum — t3.large OOMs loading marker models). The main app reaches it via private IP within the same VPC.
+
+#### 2.14a Launch the PDFX instance
+
+```bash
+PDFX_ID=$(aws ec2 run-instances --region us-east-1 \
+  --image-id ami-0462ececcfe0a450f --instance-type t3.xlarge \
+  --key-name go-ssh --security-group-ids "$SG_ID" \
+  --subnet-id subnet-0a09e8ea837f8606b --associate-public-ip-address \
+  --block-device-mappings '[{"DeviceName":"/dev/sda1","Ebs":{"VolumeSize":50,"VolumeType":"gp3","DeleteOnTermination":true}}]' \
+  --tag-specifications 'ResourceType=instance,Tags=[{Key=Name,Value=agr-ai-curation-pdfx}]' \
+  --query 'Instances[0].InstanceId' --output text)
+aws ec2 wait instance-running --instance-ids "$PDFX_ID" --region us-east-1
+
+PDFX_PRIVATE_IP=$(aws ec2 describe-instances --instance-ids "$PDFX_ID" --region us-east-1 \
+  --query 'Reservations[0].Instances[0].PrivateIpAddress' --output text)
+PDFX_PUBLIC_IP=$(aws ec2 describe-instances --instance-ids "$PDFX_ID" --region us-east-1 \
+  --query 'Reservations[0].Instances[0].PublicIpAddress' --output text)
+echo "PDFX instance: $PDFX_ID at private=$PDFX_PRIVATE_IP public=$PDFX_PUBLIC_IP"
+```
+
+#### 2.14b Add SG rule for internal PDFX access
+
+The main app needs to reach PDFX on port 5000 via private IP. Add a self-referencing security group rule (only needed once):
+
+```bash
+aws ec2 authorize-security-group-ingress --group-id "$SG_ID" --region us-east-1 \
+  --ip-permissions "IpProtocol=tcp,FromPort=5000,ToPort=5000,UserIdGroupPairs=[{GroupId=$SG_ID,Description=PDFX-internal}]"
+```
+
+#### 2.14c Bootstrap the PDFX instance
+
+```bash
+ssh -i /path/to/key ubuntu@$PDFX_PUBLIC_IP
+
+# On the PDFX instance:
+sudo apt-get update && sudo apt-get upgrade -y
+curl -fsSL https://get.docker.com | sh
+sudo usermod -aG docker ubuntu
+sudo apt-get install -y docker-compose-plugin git
+# Log out and back in (or use `sg docker`) for docker group to take effect
+```
+
+#### 2.14d Clone and configure PDFX
+
+```bash
+cd /opt
+sudo git clone https://github.com/alliance-genome/agr_pdf_extraction_service.git
+sudo chown -R ubuntu:ubuntu agr_pdf_extraction_service
+cd agr_pdf_extraction_service
+mkdir -p data/{cache,uploads,models,model_cache} logs
+
+cat > .env <<'EOF'
+OPENAI_API_KEY=<your-openai-key>
+DOCLING_DEVICE=cpu
+MARKER_DEVICE=cpu
+CONSENSUS_ENABLED=true
+PDFX_SELECTED_METHODS=grobid,docling,marker
+PDFX_DEFAULT_MERGE=true
+PDFX_GPU_ENABLED=false
+PDFX_WORKER_CPUS=7.0
+PDFX_WORKER_MEM_LIMIT=24g
+EOF
+chmod 600 .env
+```
+
+#### 2.14e Apply GROBID cgroup v2 fix
+
+On Ubuntu 24.04 (cgroup v2), GROBID's JVM crashes without this fix. Add to the grobid service in `deploy/docker-compose.yml`:
+
+```yaml
+    environment:
+      JAVA_TOOL_OPTIONS: "-XX:-UseContainerSupport"
+```
+
+Or via sed:
+
+```bash
+sed -i '/pdfx-grobid/,/healthcheck/{/init: true/a\    environment:\n      JAVA_TOOL_OPTIONS: "-XX:-UseContainerSupport"
+}' deploy/docker-compose.yml
+```
+
+#### 2.14f Increase Celery time limits for CPU marker
+
+Marker on CPU takes 15-30+ minutes per paper. The default Celery soft time limit (1800s) will kill the worker mid-extraction. Edit `celery_app.py` to increase both limits:
+
+```bash
+cd /opt/agr_pdf_extraction_service
+sed -i 's/task_soft_time_limit=1800/task_soft_time_limit=7200/' celery_app.py
+sed -i 's/task_time_limit=2100/task_time_limit=7500/' celery_app.py
+```
+
+Verify:
+
+```bash
+grep time_limit celery_app.py
+```
+
+> **This edit must be done before the first `docker compose up`**, or the images must be rebuilt with `--build` after editing.
+
+#### 2.14g Start the PDFX stack
+
+```bash
+docker compose -f deploy/docker-compose.yml up -d
+```
+
+#### 2.14g Run PDFX database migrations
+
+The PDFX service has its own Postgres database. The schema must be initialized before extraction tracking works:
+
+```bash
+docker exec pdfx-app alembic upgrade head
+```
+
+> **If you skip this step**, PDF uploads will appear to submit but the service can't track extraction progress. The app logs will show `relation "extraction_run" does not exist`.
+
+#### 2.14h Verify PDFX health
+
+```bash
+curl http://localhost:5000/api/v1/health
+```
+
+Should return `{"status": "ok", "checks": {"grobid": "ok", "redis": "ok", "service": "ok", "workers": 1}}`.
+
+#### 2.14i Point the main app at PDFX
+
+On the **main app instance**, update `.env` and **recreate** (not restart) the backend:
+
+```bash
+# Set the PDFX URL, methods (must include all 3 for merge), and timeout
+cat >> ~/.agr_ai_curation/.env <<EOF
+PDF_EXTRACTION_SERVICE_URL=http://${PDFX_PRIVATE_IP}:5000
+PDF_EXTRACTION_METHODS=grobid,docling,marker
+PDF_EXTRACTION_TIMEOUT=7200
+EOF
+
+# Recreate the backend container (restart does NOT pick up .env changes)
+cd ~/agr_ai_curation
+docker compose --env-file ~/.agr_ai_curation/.env -f docker-compose.production.yml stop backend
+docker compose --env-file ~/.agr_ai_curation/.env -f docker-compose.production.yml rm -f backend
+docker compose --env-file ~/.agr_ai_curation/.env -f docker-compose.production.yml up -d backend
+```
+
+> **Critical: `docker compose restart` does NOT apply .env changes.** You must stop, remove, and recreate the container. This applies any time you change `.env` values.
+
+Verify the backend sees the PDFX service:
+
+```bash
+docker exec agr_ai_curation-backend-1 python -c "import os; print(os.environ.get('PDF_EXTRACTION_SERVICE_URL'))"
+```
+
+#### 2.14j First PDF upload is slow
+
+The first PDF upload triggers marker model downloads (~1.3 GB). This takes 1-3 minutes and consumes significant memory. Subsequent uploads reuse cached models and are faster. The full extraction pipeline (GROBID + marker + consensus merge) takes ~5-15 minutes per paper on CPU.
+
+### 2.15 Verify
 
 ```bash
 curl -k https://localhost/
@@ -405,6 +593,23 @@ sudo rm -rf ~/.agr_ai_curation/runtime/state/package_runner/
 
 After clearing, restart the backend so it rebuilds the venv.
 
+### Local build ignored — Compose pulls upstream image
+
+If you build a Docker image locally but Compose keeps using the old upstream image, check two things:
+
+1. **Tag mismatch**: The `.env` file sets `BACKEND_IMAGE_TAG` (e.g. `latest`). Your `docker build -t` must use the same tag. If you build with a different tag, Compose won't find your local image and will pull from ECR.
+
+2. **Stale buildx cache**: Even `--no-cache` may not help because buildx has its own layer cache. Run `docker builder prune -af` before rebuilding.
+
+To verify which image a container is actually using:
+
+```bash
+docker inspect <container-name> --format "{{.Image}}"
+docker run --rm <image>:<tag> grep "something" /app/backend/src/config.py
+```
+
+If the `docker run` test shows the right code but the container doesn't, the container was created from an older image with the same tag. Stop, remove the container, and `docker compose up -d` again.
+
 ### GROBID cgroup v2 crash
 
 On hosts running cgroup v2 (most modern Ubuntu/Debian), GROBID's JVM crashes because the JVM incorrectly reads container memory limits. Fix by setting this environment variable on the GROBID container:
@@ -418,6 +623,65 @@ In a PDFX compose file, add it to the GROBID service's `environment` section. Wi
 ### Duplicate keys in docker-compose.production.yml after git pull
 
 If env vars (like `GITHUB_CLIENT_ID`) were previously added manually via `sed` and have since been committed upstream, running `git pull` followed by the same `sed` command again will produce duplicate YAML keys. Docker Compose will fail to parse the file. Always check whether the keys already exist before adding them.
+
+### `docker compose restart` does NOT pick up .env changes
+
+If you change a value in `.env` and run `docker compose restart backend`, the container keeps its old environment. You must stop, remove, and recreate:
+
+```bash
+docker compose --env-file ~/.agr_ai_curation/.env -f docker-compose.production.yml stop backend
+docker compose --env-file ~/.agr_ai_curation/.env -f docker-compose.production.yml rm -f backend
+docker compose --env-file ~/.agr_ai_curation/.env -f docker-compose.production.yml up -d backend
+```
+
+This bit us when changing `PDF_EXTRACTION_SERVICE_URL` to a new PDFX instance IP — the backend kept connecting to the old IP.
+
+### PDFX "extraction_run" table does not exist
+
+If PDF uploads appear to submit but the PDFX service can't track progress, the PDFX Postgres database hasn't been migrated. Run:
+
+```bash
+docker exec pdfx-app alembic upgrade head
+```
+
+This creates the `extraction_run` table. Without it, the app logs show `relation "extraction_run" does not exist` and extraction status polling fails.
+
+### PDFX worker OOM on t3.large and t3.xlarge
+
+The marker PDF extractor downloads ~1.3 GB of model files and loads them into memory, then peaks at ~10 GB RSS during inference.
+
+- **t3.large (8 GB)**: OOM during model download.
+- **t3.xlarge (16 GB)**: OOM during marker inference (models load but processing exceeds available RAM with GROBID + other containers).
+- **t3.2xlarge (32 GB)**: Works. This is the minimum for GROBID + Docling + marker on CPU.
+
+### PDFX timeouts on CPU: backend and Celery
+
+Marker on CPU takes 15-30+ minutes per paper. Two timeout layers must both be large enough:
+
+1. **Backend `PDF_EXTRACTION_TIMEOUT`** (default 300s): How long the backend polls the PDFX API. Set to at least `7200` (2 hours) in `.env`.
+2. **Celery `task_soft_time_limit`** (default 1800s in `celery_app.py`): How long the Celery worker allows a task to run before killing it. Must be edited in the source and the image rebuilt. Set to at least `7200`.
+
+If the backend times out, you see `PDF extraction timed out before completion`. If Celery times out, you see `SoftTimeLimitExceeded` in the worker logs and the backend eventually sees a failed extraction.
+
+### Consensus merge requires all 3 extractors
+
+If `PDF_EXTRACTION_MERGE=true` and `CONSENSUS_ENABLED=true`, the PDFX consensus pipeline requires all 3 extractors (GROBID, Docling, and Marker). If you only send 2 methods, the merge fails immediately with:
+
+```
+Merge requires consensus pipeline with all 3 extractors (CONSENSUS_ENABLED=true, grobid, docling, marker)
+```
+
+Set `PDF_EXTRACTION_METHODS=grobid,docling,marker` in the **backend** `.env` (not the PDFX `.env` — the backend sends the methods in each request). Also set `PDFX_SELECTED_METHODS=grobid,docling,marker` in the PDFX `.env` for consistency.
+
+### SSH known_hosts mismatch when reusing an Elastic IP
+
+When you terminate an instance and launch a new one with the same EIP, the new instance has a different host key. SSH will refuse to connect with `REMOTE HOST IDENTIFICATION HAS CHANGED`. Fix:
+
+```bash
+ssh-keygen -f ~/.ssh/known_hosts -R <elastic-ip>
+```
+
+This is expected and safe when you know you replaced the instance.
 
 ---
 
