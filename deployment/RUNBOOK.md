@@ -419,6 +419,85 @@ In a PDFX compose file, add it to the GROBID service's `environment` section. Wi
 
 If env vars (like `GITHUB_CLIENT_ID`) were previously added manually via `sed` and have since been committed upstream, running `git pull` followed by the same `sed` command again will produce duplicate YAML keys. Docker Compose will fail to parse the file. Always check whether the keys already exist before adding them.
 
+### GPU PDFX instance needs 200 GB disk
+
+The GPU Docker image (PyTorch + CUDA runtime + application) is ~40 GB. Marker and Docling models add another ~5 GB. Combined with the OS and Docker layer cache, 100 GB fills up completely. Use at least 200 GB for the GPU PDFX instance. The symptom is corrupted model files (`SafetensorError: incomplete metadata, file not fully covered`) because downloads were truncated when disk filled.
+
+To expand a running EBS volume:
+
+```bash
+aws ec2 modify-volume --volume-id <vol-id> --size 200 --region us-east-1
+# Then on the instance:
+sudo growpart /dev/nvme0n1 1
+sudo resize2fs /dev/nvme0n1p1
+```
+
+### Docling CUDA mode crashes on newer NVIDIA drivers
+
+On the Deep Learning AMI (NVIDIA driver 580, CUDA 13.0), Docling's GPU mode fails with a CUDA JIT compilation error (dumps raw kernel source code as the error message). The GPU Dockerfile builds against CUDA 12.8 which is incompatible with the host's CUDA 13.0 for Docling's onnxruntime-gpu.
+
+**Fix:** Set `DOCLING_DEVICE=cpu` in both the PDFX `.env` and `deploy/docker-compose.gpu.yml`. Docling is CPU-friendly and fast enough on CPU. Marker is the one that benefits from GPU.
+
+### GPU compose uses GELF logging to Alliance endpoint
+
+The `deploy/docker-compose.gpu.yml` ships with GELF log drivers pointing to `logs.alliancegenome.org:12201`. We don't have access to that endpoint. If left in place, container startup may hang or produce warnings.
+
+**Fix:** Remove all `logging: driver: gelf` blocks from `docker-compose.gpu.yml`:
+
+```python
+python3 -c "
+import re
+content = open('deploy/docker-compose.gpu.yml').read()
+content = re.sub(r'    logging:\n      driver: gelf\n      options:\n        gelf-address:.*\n        tag:.*\n', '', content)
+open('deploy/docker-compose.gpu.yml', 'w').write(content)
+"
+```
+
+### GPU compose GROBID also needs cgroup v2 fix
+
+The GROBID cgroup v2 crash affects both the CPU and GPU compose files. The GPU compose has `JAVA_OPTS` but not `JAVA_TOOL_OPTIONS`. Add it to the grobid service environment in `docker-compose.gpu.yml`:
+
+```yaml
+environment:
+  JAVA_OPTS: "-Xms2g -Xmx4g -XX:+UseG1GC"
+  JAVA_TOOL_OPTIONS: "-XX:-UseContainerSupport"
+```
+
+### Package tools fail: No module named 'agr_ai_curation_runtime'
+
+The catalog service imports package-backed tools in-process at startup but didn't include the host runtime src directory in sys.path. Tools that import from `agr_ai_curation_runtime` (search_document, read_section, etc.) fail with `No module named 'agr_ai_curation_runtime'`.
+
+**Fixed in our fork** (`feature/pdfx-on-demand` branch, `catalog_service.py`). The fix adds `/app/backend/src` to sys.path when importing package tools, matching what `package_runner_entrypoint.py` already does.
+
+### Package venv missing weaviate-client
+
+The `search_document` and `read_section` tools import from `agr_ai_curation_runtime.weaviate_chunks`, which requires the `weaviate` Python client. This must be in `packages/alliance/requirements/runtime.txt`:
+
+```
+weaviate-client>=4.0
+```
+
+After adding it, clear the venv cache and restart:
+
+```bash
+sudo rm -rf ~/.agr_ai_curation/runtime/state/package_runner/
+# Also update the runtime copy:
+cp packages/alliance/requirements/runtime.txt \
+   ~/.agr_ai_curation/runtime/packages/alliance/requirements/runtime.txt
+```
+
+### Runtime packages directory must be updated after code changes
+
+The backend reads packages from `~/.agr_ai_curation/runtime/packages/`, NOT from the repo checkout. After changing any file in `packages/alliance/` (requirements, agent configs, tool code), you must copy the updated files to the runtime directory:
+
+```bash
+cp -r /opt/agr_ai_curation/packages/alliance/* \
+      ~/.agr_ai_curation/runtime/packages/alliance/
+sudo rm -rf ~/.agr_ai_curation/runtime/state/package_runner/
+```
+
+Then recreate the backend container. Without this, the backend uses stale package definitions.
+
 ---
 
 ## 6. Noctua Integration
