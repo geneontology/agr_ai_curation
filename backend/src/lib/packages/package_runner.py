@@ -193,6 +193,11 @@ class PackageToolRunner:
                 environment_reused=environment.reused,
             )
 
+        # Log subprocess stderr for debugging (tool-level print(..., file=sys.stderr))
+        if completed.stderr and completed.stderr.strip():
+            for line in completed.stderr.strip().splitlines():
+                logger.info("[package:%s] %s", tool_id, line)
+
         return PackageToolExecutionResult(
             ok=True,
             result=response.result,

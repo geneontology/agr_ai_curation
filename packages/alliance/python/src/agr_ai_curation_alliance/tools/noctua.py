@@ -153,82 +153,99 @@ def create_noctua_tool(context: dict[str, Any]):
         relation ontology terms (RO:NNNNNNN) for predicates,
         and ECO terms (ECO:NNNNNNN) for evidence codes.
         """
+        import sys
+        _log = lambda msg: print(f"[noctua_gocam] {msg}", file=sys.stderr)
+        _log(f"action={action} model_id={model_id} class_curie={class_curie} "
+             f"assign_var={assign_var} subject={subject} object_={object_} predicate={predicate}")
+
+        result = None
         try:
             if action == "list_models":
-                result = client.list_models(
+                api_result = client.list_models(
                     limit=limit,
                     title=title or None,
                 )
-                models = result.get("models", [])
+                models = api_result.get("models", [])
                 if not models:
-                    return "No models found."
-                lines = [f"Found {len(models)} model(s):"]
-                for m in models[:limit]:
-                    mid = m.get("id", "?")
-                    mtitle = m.get("title", "(untitled)")
-                    lines.append(f"  - {mid}: {mtitle}")
-                return "\n".join(lines)
+                    result = "No models found."
+                else:
+                    lines = [f"Found {len(models)} model(s):"]
+                    for m in models[:limit]:
+                        mid = m.get("id", "?")
+                        mtitle = m.get("title", "(untitled)")
+                        lines.append(f"  - {mid}: {mtitle}")
+                    result = "\n".join(lines)
 
             elif action == "get_model":
                 if not model_id:
-                    return "Error: model_id is required for get_model"
-                resp = client.get_model(model_id)
-                return _model_summary(resp)
+                    result = "Error: model_id is required for get_model"
+                else:
+                    resp = client.get_model(model_id)
+                    result = _model_summary(resp)
 
             elif action == "create_model":
                 resp = client.create_model(title=title or None)
-                return f"Created model: {_summarize_response(resp)}"
+                result = f"Created model: {_summarize_response(resp)}"
 
             elif action == "add_individual":
                 if not model_id or not class_curie:
-                    return "Error: model_id and class_curie are required"
-                resp = client.add_individual(
-                    model_id,
-                    class_curie,
-                    assign_var=assign_var or "x1",
-                )
-                return f"Added individual: {_summarize_response(resp)}"
+                    result = "Error: model_id and class_curie are required"
+                else:
+                    resp = client.add_individual(
+                        model_id,
+                        class_curie,
+                        assign_var=assign_var or "x1",
+                    )
+                    result = f"Added individual: {_summarize_response(resp)}"
 
             elif action == "add_fact":
                 if not all([model_id, subject, object_, predicate]):
-                    return "Error: model_id, subject, object_, and predicate are required"
-                resp = client.add_fact(model_id, subject, object_, predicate)
-                return f"Added fact: {_summarize_response(resp)}"
+                    result = "Error: model_id, subject, object_, and predicate are required"
+                else:
+                    resp = client.add_fact(model_id, subject, object_, predicate)
+                    result = f"Added fact: {_summarize_response(resp)}"
 
             elif action == "add_evidence":
                 if not all([model_id, subject, object_, predicate, eco_id, sources]):
-                    return "Error: model_id, subject, object_, predicate, eco_id, and sources are required"
-                source_list = [s.strip() for s in sources.split(",") if s.strip()]
-                resp = client.add_fact_with_evidence(
-                    model_id, subject, object_, predicate,
-                    eco_id=eco_id, sources=source_list,
-                )
-                return f"Added fact with evidence: {_summarize_response(resp)}"
+                    result = "Error: model_id, subject, object_, predicate, eco_id, and sources are required"
+                else:
+                    source_list = [s.strip() for s in sources.split(",") if s.strip()]
+                    resp = client.add_fact_with_evidence(
+                        model_id, subject, object_, predicate,
+                        eco_id=eco_id, sources=source_list,
+                    )
+                    result = f"Added fact with evidence: {_summarize_response(resp)}"
 
             elif action == "remove_fact":
                 if not all([model_id, subject, object_, predicate]):
-                    return "Error: model_id, subject, object_, and predicate are required"
-                resp = client.remove_fact(model_id, subject, object_, predicate)
-                return f"Removed fact: {_summarize_response(resp)}"
+                    result = "Error: model_id, subject, object_, and predicate are required"
+                else:
+                    resp = client.remove_fact(model_id, subject, object_, predicate)
+                    result = f"Removed fact: {_summarize_response(resp)}"
 
             elif action == "export_model":
                 if not model_id:
-                    return "Error: model_id is required for export_model"
-                resp = client.export_model(model_id, format=format or "markdown")
-                if resp.ok:
-                    return str(resp.raw.get("data", resp.raw))
-                return f"Export failed: {resp.error}"
+                    result = "Error: model_id is required for export_model"
+                else:
+                    resp = client.export_model(model_id, format=format or "markdown")
+                    if resp.ok:
+                        result = str(resp.raw.get("data", resp.raw))
+                    else:
+                        result = f"Export failed: {resp.error}"
 
             else:
-                return (
+                result = (
                     f"Unknown action '{action}'. Available actions: "
                     "list_models, get_model, create_model, add_individual, "
                     "add_fact, add_evidence, remove_fact, export_model"
                 )
 
         except Exception as exc:
-            logger.exception("Noctua tool error (action=%s)", action)
-            return f"Error: {exc}"
+            _log(f"EXCEPTION: {exc}")
+            result = f"Error: {exc}"
+
+        _log(f"RESULT: {result[:500] if result else 'None'}")
+        return result
 
     return noctua_gocam
 
