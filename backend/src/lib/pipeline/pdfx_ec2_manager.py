@@ -137,6 +137,9 @@ async def ensure_running() -> None:
     state = _get_instance_state()
     logger.info("PDFX EC2 instance %s is in state: %s", _instance_id, state)
 
+    # Reset idle timer now — prevents watchdog from stopping a freshly started instance
+    _last_activity = time.monotonic()
+
     if state == "stopped":
         _start_instance()
     elif state == "running":
@@ -177,13 +180,25 @@ def should_stop_idle() -> bool:
     """Return True if the instance has been idle long enough to stop.
 
     Called by the idle watchdog (cron, background task, or Lambda).
+    Only returns True if:
+    - On-demand management is enabled
+    - Activity has been recorded at least once
+    - Idle time exceeds the configured threshold
+    - The instance is actually running (avoid stopping already-stopped instances)
     """
     if not is_enabled() or _idle_minutes <= 0:
         return False
     if _last_activity == 0.0:
         return False
     idle_seconds = time.monotonic() - _last_activity
-    return idle_seconds > (_idle_minutes * 60)
+    if idle_seconds <= (_idle_minutes * 60):
+        return False
+    # Only stop if actually running
+    try:
+        state = _get_instance_state()
+        return state == "running"
+    except Exception:
+        return False
 
 
 def get_status() -> dict:
