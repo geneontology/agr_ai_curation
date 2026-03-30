@@ -26,19 +26,38 @@ def _require_context_value(context: dict[str, Any], key: str) -> str:
     return value
 
 
-def _summarize_response(resp: Any) -> str:
-    """Convert a BaristaResponse to a concise string for the agent."""
+def _summarize_response(resp: Any, highlight_new: str = "") -> str:
+    """Convert a BaristaResponse to a concise string for the agent.
+
+    Returns actual Minerva IDs so the LLM can use them in subsequent calls
+    (important because each tool call runs in a fresh subprocess — variable
+    tracking does not persist between calls).
+    """
     if not resp.ok:
-        return f"Error: {resp.error or 'unknown error'}"
+        error_msg = resp.error or "unknown error"
+        # Include the raw API message for debugging
+        raw_message = resp.raw.get("message", "") if resp.raw else ""
+        if raw_message and raw_message != error_msg:
+            return f"Error: {error_msg} — {raw_message}"
+        return f"Error: {error_msg}"
     parts = []
     if resp.model_id:
         parts.append(f"model_id: {resp.model_id}")
     if resp.individuals:
         parts.append(f"{len(resp.individuals)} individual(s)")
+        # Show actual IDs so LLM can use them in add_fact calls
+        for ind in resp.individuals:
+            ind_id = ind.get("id", "") if isinstance(ind, dict) else getattr(ind, "id", "")
+            types = ind.get("type", []) if isinstance(ind, dict) else []
+            label = ""
+            for t in types:
+                if isinstance(t, dict) and t.get("label"):
+                    label = t["label"]
+                    break
+            if ind_id:
+                parts.append(f"  individual: {ind_id} ({label})")
     if resp.facts:
         parts.append(f"{len(resp.facts)} fact(s)")
-    if resp.model_vars:
-        parts.append(f"variables: {json.dumps(resp.model_vars)}")
     return "; ".join(parts) if parts else "OK"
 
 
@@ -123,6 +142,11 @@ def create_noctua_tool(context: dict[str, Any]):
                            (required: model_id, subject, object_, predicate)
           export_model    - Export model in a format (required: model_id;
                            optional: format = owl|ttl|json-ld|gaf|markdown)
+
+        IMPORTANT: Each tool call runs independently. Variable names (assign_var)
+        do NOT persist between calls. After add_individual, the response includes
+        the actual individual ID (e.g., "gomodel:xxx/individual-123"). You MUST
+        use these actual IDs (not variable names) as subject/object_ in add_fact.
 
         GO-CAM models represent biological pathways as causal activity models.
         Use GO terms (GO:NNNNNNN) for molecular functions/processes,
