@@ -922,7 +922,10 @@ def _extend_sys_path_for_package(package: Any) -> None:
     python_package_root = (
         package.package_path / package.manifest.python_package_root
     ).expanduser().resolve(strict=False)
-    for candidate in (python_package_root.parent, python_package_root, package.package_path):
+    # Include the host runtime src dir so tools can import agr_ai_curation_runtime
+    # (mirrors the sys.path setup in package_runner_entrypoint.py)
+    host_runtime_src_dir = Path(__file__).resolve().parent.parent.parent
+    for candidate in (host_runtime_src_dir, python_package_root.parent, python_package_root, package.package_path):
         candidate_text = str(candidate)
         if candidate_text not in sys.path:
             sys.path.insert(0, candidate_text)
