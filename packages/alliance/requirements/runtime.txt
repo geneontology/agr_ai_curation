@@ -7,4 +7,5 @@ pydantic>=2.0
 requests>=2.0
 SQLAlchemy>=2.0
 psycopg2-binary
+weaviate-client>=4.0
 git+https://github.com/geneontology/noctua-py.git
