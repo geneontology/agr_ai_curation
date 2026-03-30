@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -19,6 +20,8 @@ from .runner_protocol import (
     encode_request,
 )
 from .tool_registry import ToolRegistry, load_tool_registry
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
