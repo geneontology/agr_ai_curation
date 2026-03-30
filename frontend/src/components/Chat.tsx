@@ -5,6 +5,7 @@ import { dispatchClearHighlights, dispatchPDFDocumentChanged } from '@/component
 import MessageActions from '@/components/Chat/MessageActions'
 import FeedbackDialog from '@/components/Chat/FeedbackDialog'
 import FileDownloadCard, { FileInfo } from '@/components/Chat/FileDownloadCard'
+import GoCamCard from '@/components/Chat/GoCamCard'
 import { submitFeedback } from '@/services/feedbackService'
 import { useAuth } from '@/contexts/AuthContext'
 import type { SSEEvent } from '@/hooks/useChatStream'
@@ -89,6 +90,33 @@ interface StoredChatData {
 
 function shouldShowCurationDbWarning(status?: string | null): boolean {
   return status !== 'connected' && status !== 'not_configured'
+}
+
+/** Regex to find GO-CAM model IDs in text (e.g., gomodel:69b432fc00000423) */
+const GOCAM_ID_PATTERN = /gomodel:[0-9a-f]{16,}/g
+
+/**
+ * Render message content with inline GO-CAM cards for any model IDs found.
+ * Splits the text around model IDs and inserts GoCamCard components.
+ */
+function renderContentWithGoCam(content: string): React.ReactNode {
+  const matches = content.match(GOCAM_ID_PATTERN)
+  if (!matches || matches.length === 0) {
+    return content
+  }
+
+  // Deduplicate model IDs
+  const uniqueIds = [...new Set(matches)]
+
+  // Render the text content followed by GO-CAM cards for each unique model
+  return (
+    <>
+      {content}
+      {uniqueIds.map(modelId => (
+        <GoCamCard key={modelId} modelId={modelId} />
+      ))}
+    </>
+  )
 }
 
 // Helper to load messages from localStorage with session validation
@@ -1363,7 +1391,7 @@ function Chat({
                 {message.type === 'file_download' && message.fileData ? (
                   <FileDownloadCard file={message.fileData} />
                 ) : (
-                  message.content
+                  renderContentWithGoCam(message.content)
                 )}
               </div>
               {message.role === 'assistant' ? (
