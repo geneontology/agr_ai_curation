@@ -635,8 +635,11 @@ async def parse_pdf_document(
     cancel_requested_callback: Optional[CancelRequestedCallback] = None,
 ) -> Dict[str, Any]:
     """Parse PDF document using AGR PDF extraction service."""
+    from . import pdfx_ec2_manager
+    if pdfx_ec2_manager.is_enabled():
+        await pdfx_ec2_manager.ensure_running()
     parser = PDFXParser()
-    return await parser.parse_pdf_document(
+    result = await parser.parse_pdf_document(
         file_path=file_path,
         document_id=document_id,
         user_id=user_id,
@@ -646,6 +649,9 @@ async def parse_pdf_document(
         process_id_callback=process_id_callback,
         cancel_requested_callback=cancel_requested_callback,
     )
+    if pdfx_ec2_manager.is_enabled():
+        pdfx_ec2_manager.record_activity()
+    return result
 
 
 def validate_pdf_file(file_path: Path) -> Dict[str, Any]:

@@ -6,6 +6,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
+import asyncio
 import logging
 import os
 
@@ -423,8 +424,35 @@ async def lifespan(app: FastAPI):
         logger.error("The application cannot start without Weaviate database connection!")
         raise  # Fail fast - don't start if DB isn't ready
 
+    # Start PDFX EC2 idle watchdog (no-op if PDFX_EC2_INSTANCE_ID not set)
+    pdfx_idle_task = None
+    try:
+        from src.lib.pipeline.pdfx_ec2_manager import is_enabled as pdfx_ec2_enabled
+        if pdfx_ec2_enabled():
+            from src.lib.pipeline.pdfx_ec2_manager import (
+                should_stop_idle,
+                stop_instance,
+                get_status,
+            )
+            logger.info("PDFX on-demand EC2 management enabled: %s", get_status())
+
+            async def _pdfx_idle_watchdog():
+                while True:
+                    await asyncio.sleep(60)
+                    try:
+                        if should_stop_idle():
+                            stop_instance()
+                    except Exception as exc:
+                        logger.warning("PDFX idle watchdog error: %s", exc)
+
+            pdfx_idle_task = asyncio.create_task(_pdfx_idle_watchdog())
+    except Exception as e:
+        logger.warning("PDFX EC2 manager init failed (non-fatal): %s", e)
+
     yield
 
+    if pdfx_idle_task:
+        pdfx_idle_task.cancel()
     logger.info("Shutting down Weaviate Control Panel API...")
     try:
         await connection.close()
@@ -614,5 +642,13 @@ async def health_check():
         logger.error("Redis health check failed: %s", e)
         health_status["services"]["redis"] = "disconnected"
         health_status["status"] = "degraded"
+
+    # Include PDFX EC2 manager status if enabled
+    try:
+        from src.lib.pipeline.pdfx_ec2_manager import is_enabled, get_status
+        if is_enabled():
+            health_status["services"]["pdfx_ec2"] = get_status()
+    except Exception:
+        pass
 
     return health_status
