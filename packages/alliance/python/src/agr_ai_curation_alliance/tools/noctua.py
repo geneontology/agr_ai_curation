@@ -89,6 +89,21 @@ def _model_summary(resp: Any) -> str:
     return "\n".join(parts)
 
 
+def _noctua_base_url(barista_base: str) -> str:
+    """Derive the Noctua UI base URL from the Barista API base URL."""
+    # barista-dev.berkeleybop.org → noctua-dev.berkeleybop.org
+    # barista.berkeleybop.org → noctua.berkeleybop.org
+    return barista_base.replace("barista-dev", "noctua-dev").replace("barista", "noctua")
+
+
+def _model_links(model_id: str, noctua_base: str) -> str:
+    """Generate editor and pathway view links for a GO-CAM model."""
+    from urllib.parse import quote
+    editor = f"{noctua_base}/editor/graph/{model_id}"
+    pathway = f"{noctua_base}/workbench/noctua-alliance-pathway-preview/?model_id={quote(model_id, safe='')}"
+    return f"Links:\n  Editor: {editor}\n  Pathway view: {pathway}"
+
+
 def create_noctua_tool(context: dict[str, Any]):
     """Create the noctua GO-CAM tool with the user's Barista token."""
     barista_token = _require_context_value(context, "barista_token")
@@ -101,6 +116,7 @@ def create_noctua_tool(context: dict[str, Any]):
         "BARISTA_BASE_URL", "http://barista-dev.berkeleybop.org"
     )
     barista_namespace = os.getenv("BARISTA_NAMESPACE", "minerva_public_dev")
+    noctua_base = _noctua_base_url(barista_base)
 
     client = BaristaClient(
         token=barista_token,
@@ -148,6 +164,9 @@ def create_noctua_tool(context: dict[str, Any]):
         the actual individual ID (e.g., "gomodel:xxx/individual-123"). You MUST
         use these actual IDs (not variable names) as subject/object_ in add_fact.
 
+        Every response includes Editor and Pathway view links for the model.
+        ALWAYS share these links with the user so they can view the model.
+
         GO-CAM models represent biological pathways as causal activity models.
         Use GO terms (GO:NNNNNNN) for molecular functions/processes,
         relation ontology terms (RO:NNNNNNN) for predicates,
@@ -181,11 +200,11 @@ def create_noctua_tool(context: dict[str, Any]):
                     result = "Error: model_id is required for get_model"
                 else:
                     resp = client.get_model(model_id)
-                    result = _model_summary(resp)
+                    result = f"{_model_summary(resp)}\n{_model_links(model_id, noctua_base)}"
 
             elif action == "create_model":
                 resp = client.create_model(title=title or None)
-                result = f"Created model: {_summarize_response(resp)}"
+                result = f"Created model: {_summarize_response(resp)}\n{_model_links(resp.model_id, noctua_base)}"
 
             elif action == "add_individual":
                 if not model_id or not class_curie:
@@ -196,14 +215,14 @@ def create_noctua_tool(context: dict[str, Any]):
                         class_curie,
                         assign_var=assign_var or "x1",
                     )
-                    result = f"Added individual: {_summarize_response(resp)}"
+                    result = f"Added individual: {_summarize_response(resp)}\n{_model_links(model_id, noctua_base)}"
 
             elif action == "add_fact":
                 if not all([model_id, subject, object_, predicate]):
                     result = "Error: model_id, subject, object_, and predicate are required"
                 else:
                     resp = client.add_fact(model_id, subject, object_, predicate)
-                    result = f"Added fact: {_summarize_response(resp)}"
+                    result = f"Added fact: {_summarize_response(resp)}\n{_model_links(model_id, noctua_base)}"
 
             elif action == "add_evidence":
                 if not all([model_id, subject, object_, predicate, eco_id, sources]):
@@ -214,7 +233,7 @@ def create_noctua_tool(context: dict[str, Any]):
                         model_id, subject, object_, predicate,
                         eco_id=eco_id, sources=source_list,
                     )
-                    result = f"Added fact with evidence: {_summarize_response(resp)}"
+                    result = f"Added fact with evidence: {_summarize_response(resp)}\n{_model_links(model_id, noctua_base)}"
 
             elif action == "remove_fact":
                 if not all([model_id, subject, object_, predicate]):
